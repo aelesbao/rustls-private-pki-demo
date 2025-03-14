@@ -17,13 +17,13 @@ struct Cli {
     command: Commands,
 
     /// Sets the log level..
-    #[arg(long, value_name = "LEVEL", default_value = "info")]
+    #[arg(long, value_name = "LEVEL", default_value = "info", global = true)]
     pub log_level: tracing::metadata::LevelFilter,
 }
 
 #[derive(Subcommand)]
 enum Commands {
-    /// COmmands to work with X.509 certificates.
+    /// Commands to work with X.509 certificates.
     Cert(cert::CertArgs),
     /// Lists all prefixes contained in a CSV file.
     Validate(validate::ValidateArgs),

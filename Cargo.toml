@@ -7,6 +7,8 @@ anyhow = { version = "1.0.97", features = ["backtrace"] }
 thiserror = "2.0.12"
 
 async-trait = "0.1.87"
+chrono = "0.4.40"
+time = "0.3.39"
 
 axum = { version = "0.8.1", features = ["http2", "macros", "tower-log"] }
 reqwest = { version = "0.12.14", features = ["rustls-tls", "json"] }
