@@ -1,8 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand};
-use rcgen::{Certificate, IsCa, KeyPair, KeyUsagePurpose};
-
+use rcgen::{Certificate, ExtendedKeyUsagePurpose, IsCa, KeyPair, KeyUsagePurpose};
 use shared::{
     Runnable,
     cert::{generate_certificate, save_cert},
@@ -17,15 +16,12 @@ pub struct CertArgs {
 
 #[derive(Subcommand)]
 pub enum CertCommands {
-    /// Generates a root CA certificate.
+    /// Generates a Certificate Sign Request (CSR.
     Gen(GenArgs),
-
-    /// Signs a certificate signing request.
-    Sign(SignArgs),
 }
 
 #[derive(Parser)]
-#[command(about = "Generates a root CA certificate")]
+#[command(about = "Generates a Certificate Sign Request (CSR")]
 pub struct GenArgs {
     /// The common name of the certificate.
     #[arg(short, long)]
@@ -36,15 +32,10 @@ pub struct GenArgs {
     pub outdir: PathBuf,
 }
 
-#[derive(Parser)]
-#[command(about = "Signs a certificate signing request")]
-pub struct SignArgs {}
-
 impl Runnable for CertArgs {
     fn run(&self) -> anyhow::Result<()> {
         match &self.command {
             CertCommands::Gen(args) => run_gen(&args.common_name, &args.outdir),
-            CertCommands::Sign(_) => todo!(),
         }
     }
 }
@@ -52,22 +43,30 @@ impl Runnable for CertArgs {
 fn run_gen(common_name: &str, outdir: &Path) -> anyhow::Result<()> {
     tracing::info!("Generating Root Certificate Authority");
 
-    let (cert, key_pair) = generate_ca(common_name)?;
-    save_cert(outdir, "ca", cert, key_pair)?;
+    let (cert, key_pair) = generate_csr(common_name)?;
+    save_cert(outdir, "worker", cert, key_pair)?;
 
     tracing::info!("Root CA generated successfully");
 
     Ok(())
 }
 
-pub fn generate_ca(common_name: &str) -> anyhow::Result<(Certificate, KeyPair)> {
-    let is_ca = IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
-    // Mark as CA with basic constraints and key usage for signing
+pub fn generate_csr(common_name: &str) -> anyhow::Result<(Certificate, KeyPair)> {
+    // Set Subject Alternative Name for the worker (use hostname or IP as needed)
+    //let subject_alt_names = vec![SanType::DnsName("localhost".to_string())];
+
+    // Set key usage and extended key usage for a client/server certificate
     let key_usages = vec![
-        KeyUsagePurpose::KeyCertSign,
-        KeyUsagePurpose::CrlSign,
         KeyUsagePurpose::DigitalSignature,
+        KeyUsagePurpose::KeyEncipherment,
     ];
 
-    generate_certificate(common_name, is_ca, key_usages, vec![])
+    let extended_key_usages = vec![
+        ExtendedKeyUsagePurpose::ServerAuth,
+        ExtendedKeyUsagePurpose::ClientAuth,
+    ];
+
+    let is_ca = IsCa::ExplicitNoCa;
+
+    generate_certificate(common_name, is_ca, key_usages, extended_key_usages)
 }

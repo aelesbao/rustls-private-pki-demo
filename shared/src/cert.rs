@@ -1,7 +1,8 @@
 use std::path::Path;
 
 use rcgen::{
-    Certificate, CertificateParams, DistinguishedName, DnType, IsCa, KeyPair, KeyUsagePurpose,
+    Certificate, CertificateParams, DistinguishedName, DnType, ExtendedKeyUsagePurpose, IsCa,
+    KeyPair, KeyUsagePurpose,
 };
 
 /// Generates a certificate with the given common name and key usages.
@@ -9,6 +10,7 @@ pub fn generate_certificate(
     common_name: &str,
     is_ca: IsCa,
     key_usages: Vec<KeyUsagePurpose>,
+    extended_key_usages: Vec<ExtendedKeyUsagePurpose>,
 ) -> anyhow::Result<(Certificate, KeyPair)> {
     tracing::info!("Crafting certificate: {common_name}");
 
@@ -20,6 +22,7 @@ pub fn generate_certificate(
     params.distinguished_name = distinguished_name;
     params.is_ca = is_ca;
     params.key_usages = key_usages;
+    params.extended_key_usages = extended_key_usages;
 
     // Set validity (10 years for CA)
     let now = time::OffsetDateTime::now_utc();

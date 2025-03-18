@@ -7,5 +7,12 @@ edition = "2024"
 shared = { path = "../shared" }
 
 anyhow = { workspace = true }
+clap = { workspace = true }
+chrono = { workspace = true }
+rcgen = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
+tracing-appender = { workspace = true }
+tracing-error = { workspace = true }
+tracing-subscriber = { workspace = true }
+time = { workspace = true }
