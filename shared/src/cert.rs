@@ -6,77 +6,6 @@ use rcgen::{
     ExtendedKeyUsagePurpose, IsCa, KeyPair, KeyUsagePurpose, PKCS_ED25519, SanType,
 };
 
-#[derive(Debug, Clone)]
-/// The PEM of an issued certificate, together with the subject key pair.
-pub struct PemCertifiedKey {
-    pub cert_pem: String,
-    pub private_key_pem: String,
-}
-
-impl PemCertifiedKey {
-    /// Write the PEM certificate and key pair to the filesystem.
-    pub fn write(&self, outdir: &Path, name: &str) -> Result<(), io::Error> {
-        tracing::info!(
-            "Writing PEM certificate and key pair to '{}'",
-            outdir.to_string_lossy()
-        );
-
-        fs::create_dir_all(outdir)?;
-
-        let path = outdir.join(format!("{name}.crt"));
-        tracing::debug!(%self.cert_pem, "Saving certificate to {}", path.to_string_lossy());
-        fs::write(path, self.cert_pem.as_bytes())?;
-
-        let path = outdir.join(format!("{name}.key"));
-        tracing::debug!(%self.private_key_pem, "Saving key pair to {}", path.to_string_lossy());
-        fs::write(path, self.private_key_pem.as_bytes())?;
-
-        Ok(())
-    }
-
-    // Loads a PEM certificate and key pair from the file system.
-    pub fn read(cert_path: &Path, private_key_path: &Path) -> Result<Self, io::Error> {
-        let cert_pem = fs::read_to_string(cert_path)?;
-        let private_key_pem = fs::read_to_string(private_key_path)?;
-
-        Ok(Self {
-            cert_pem,
-            private_key_pem,
-        })
-    }
-}
-
-impl From<&CertifiedKey> for PemCertifiedKey {
-    fn from(value: &CertifiedKey) -> Self {
-        PemCertifiedKey {
-            cert_pem: value.cert.pem(),
-            private_key_pem: value.key_pair.serialize_pem(),
-        }
-    }
-}
-
-impl TryFrom<&Csr> for PemCertifiedKey {
-    type Error = rcgen::Error;
-
-    fn try_from(value: &Csr) -> Result<Self, rcgen::Error> {
-        Ok(PemCertifiedKey {
-            cert_pem: value.csr.pem()?,
-            private_key_pem: value.key_pair.serialize_pem(),
-        })
-    }
-}
-
-impl TryFrom<PemCertifiedKey> for CertifiedKey {
-    type Error = rcgen::Error;
-
-    fn try_from(value: PemCertifiedKey) -> Result<Self, Self::Error> {
-        let params = CertificateParams::from_ca_cert_pem(&value.cert_pem)?;
-        let key_pair = KeyPair::from_pem(&value.private_key_pem)?;
-        let cert = params.self_signed(&key_pair)?;
-        Ok(Self { cert, key_pair })
-    }
-}
-
 /// Builder to configure TLS [CertificateParams] to be finalized into either a CA ([CertifiedKey]) or a CSR ([Csr]).
 #[derive(Default)]
 pub struct CertificateBuilder {
@@ -202,41 +131,130 @@ impl CsrBuilder {
     }
 
     /// Builds and serialize a new certificate signing request [Csr].
-    pub fn build(self) -> Result<Csr, rcgen::Error> {
+    pub fn build(self) -> Result<CsrKey, rcgen::Error> {
         tracing::debug!("Building and serializing Certificate Signing Request");
         let key_pair = KeyPair::generate_for(&PKCS_ED25519)?;
         let csr = self.params.serialize_request(&key_pair)?;
-        Ok(Csr { csr, key_pair })
+        Ok(CsrKey { csr, key_pair })
     }
 }
 
-/// Encapsulates a [CertificateSigningRequest]
-pub struct Csr {
+/// A [CertificateSigningRequest], together with the subject key pair.
+pub struct CsrKey {
     csr: CertificateSigningRequest,
     key_pair: KeyPair,
 }
 
-impl Csr {
-    /// Sign with `signer` and serialize.
-    pub fn serialize_pem(&self) -> Result<PemCertifiedKey, rcgen::Error> {
-        let pem = PemCertifiedKey {
-            cert_pem: self.csr.pem()?,
-            private_key_pem: self.key_pair.serialize_pem(),
-        };
-        Ok(pem)
+/// Certificate signed for a CA and key pair.
+pub struct CertificateSigner {
+    ca: CertifiedKey,
+}
+
+impl CertificateSigner {
+    /// Initializes the `CertificateSigner`.
+    pub fn new(ca: CertifiedKey) -> Self {
+        Self { ca }
     }
 
-    /// Return the `&CertificateSigningRequest`.
-    pub fn csr(&self) -> &CertificateSigningRequest {
-        &self.csr
+    /// Signs a [CertificateSigningRequestParams] using a CA and key pair and returns a signed [Certificate].
+    pub fn sign_pem(&self, csr_pem: &str) -> Result<Certificate, rcgen::Error> {
+        let params = CertificateSigningRequestParams::from_pem(csr_pem)?;
+        tracing::info!("Signing CSR");
+        let signed_cert = params.signed_by(&self.ca.cert, &self.ca.key_pair)?;
+        Ok(signed_cert)
+    }
+
+    /// Signs a CSR PEM file and saves the signed certificate to the filesystem.
+    pub fn sign_pem_file(&self, csr_path: &Path, signed_cert_path: &Path) -> anyhow::Result<()> {
+        tracing::debug!("Opening CSR at {}", csr_path.to_string_lossy());
+        let csr_pem = fs::read_to_string(csr_path)?;
+        let signed_cert = self.sign_pem(&csr_pem)?;
+
+        if let Some(outdir) = signed_cert_path.parent() {
+            fs::create_dir_all(outdir)?;
+        }
+
+        tracing::debug!(
+            signed_cert = %signed_cert.pem(),
+            "Saving signed certificate to {}",
+            signed_cert_path.to_string_lossy()
+        );
+        fs::write(signed_cert_path, signed_cert.pem().as_bytes())?;
+
+        Ok(())
     }
 }
 
+#[derive(Debug, Clone)]
+/// The PEM of an issued certificate, together with the subject key pair.
+pub struct PemCertifiedKey {
+    pub cert_pem: String,
+    pub private_key_pem: String,
+}
 
-/// Signs a Certificate Signing Request using a CA and key pair.
-pub struct CertificateSigner {}
+impl PemCertifiedKey {
+    /// Write the PEM certificate and key pair to the filesystem.
+    pub fn write(&self, outdir: &Path, name: &str) -> Result<(), io::Error> {
+        tracing::info!(
+            "Writing PEM certificate and key pair to '{}'",
+            outdir.to_string_lossy()
+        );
 
-impl CertificateSigner {}
+        fs::create_dir_all(outdir)?;
+
+        let path = outdir.join(format!("{name}.crt"));
+        tracing::debug!(%self.cert_pem, "Saving certificate to {}", path.to_string_lossy());
+        fs::write(path, self.cert_pem.as_bytes())?;
+
+        let path = outdir.join(format!("{name}.key"));
+        tracing::debug!(%self.private_key_pem, "Saving key pair to {}", path.to_string_lossy());
+        fs::write(path, self.private_key_pem.as_bytes())?;
+
+        Ok(())
+    }
+
+    // Loads a PEM certificate and key pair from the file system.
+    pub fn read(cert_path: &Path, private_key_path: &Path) -> Result<Self, io::Error> {
+        let cert_pem = fs::read_to_string(cert_path)?;
+        let private_key_pem = fs::read_to_string(private_key_path)?;
+
+        Ok(Self {
+            cert_pem,
+            private_key_pem,
+        })
+    }
+}
+
+impl From<&CertifiedKey> for PemCertifiedKey {
+    fn from(value: &CertifiedKey) -> Self {
+        PemCertifiedKey {
+            cert_pem: value.cert.pem(),
+            private_key_pem: value.key_pair.serialize_pem(),
+        }
+    }
+}
+
+impl TryFrom<PemCertifiedKey> for CertifiedKey {
+    type Error = rcgen::Error;
+
+    fn try_from(value: PemCertifiedKey) -> Result<Self, Self::Error> {
+        let params = CertificateParams::from_ca_cert_pem(&value.cert_pem)?;
+        let key_pair = KeyPair::from_pem(&value.private_key_pem)?;
+        let cert = params.self_signed(&key_pair)?;
+        Ok(Self { cert, key_pair })
+    }
+}
+
+impl TryFrom<&CsrKey> for PemCertifiedKey {
+    type Error = rcgen::Error;
+
+    fn try_from(value: &CsrKey) -> Result<Self, rcgen::Error> {
+        Ok(PemCertifiedKey {
+            cert_pem: value.csr.pem()?,
+            private_key_pem: value.key_pair.serialize_pem(),
+        })
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -264,6 +282,8 @@ mod tests {
         entity_cert.assert("x");
         entity_key.assert("y");
 
+        temp.close()?;
+
         Ok(())
     }
 
@@ -277,11 +297,13 @@ mod tests {
         let entity_key = temp.child("cert.key");
         entity_key.write_str("y")?;
 
-        let pem = PemCertifiedKey::read(entity_cert.path(), entity_key.path())?;
+        let pck = PemCertifiedKey::read(entity_cert.path(), entity_key.path())?;
 
         // assert contents of PEM
-        assert_eq!(pem.cert_pem, "w");
-        assert_eq!(pem.private_key_pem, "y");
+        assert_eq!(pck.cert_pem, "w");
+        assert_eq!(pck.private_key_pem, "y");
+
+        temp.close()?;
 
         Ok(())
     }
@@ -300,8 +322,8 @@ mod tests {
         let cert = CertificateBuilder::new("Acme Ltd. CA")
             .certificate_authority()
             .build()?;
-        let cert_key_pem = PemCertifiedKey::from(&cert);
-        let ca = CertifiedKey::try_from(cert_key_pem)?;
+        let cert_pck = PemCertifiedKey::from(&cert);
+        let ca = CertifiedKey::try_from(cert_pck)?;
         let issuer_der = pem::parse(ca.cert.pem())?;
         let (_, cert) = X509Certificate::from_der(issuer_der.contents())?;
         assert_eq!(cert.issuer().to_string(), "CN=Acme Ltd. CA".to_string());
@@ -381,5 +403,39 @@ mod tests {
             .certificate_signing_request()
             .subject_alternative_names(names);
         assert_eq!(builder.params.subject_alt_names, vec![]);
+    }
+
+    #[test]
+    fn sign_csr() -> anyhow::Result<()> {
+        let ca = CertificateBuilder::new("CA")
+            .certificate_authority()
+            .build()?;
+
+        let issuer_der = pem::parse(ca.cert.pem())?;
+        let (_, issuer) = X509Certificate::from_der(issuer_der.contents())?;
+
+        let csr = CertificateBuilder::new("localhost")
+            .certificate_signing_request()
+            .build()?;
+
+        let temp = assert_fs::TempDir::new()?;
+        let csr_cert_child = temp.child("localhost.crt");
+        PemCertifiedKey::try_from(&csr)?.write(temp.path(), "localhost")?;
+
+        let signed_child = temp.child("localhost.key");
+
+        let signer = CertificateSigner::new(ca);
+        signer.sign_pem_file(csr_cert_child.path(), signed_child.path())?;
+
+        let signed_pem = fs::read_to_string(signed_child.path())?;
+        let der = pem::parse(signed_pem)?;
+        let (_, cert) = X509Certificate::from_der(der.contents())?;
+
+        let verified = cert.verify_signature(Some(issuer.public_key())).is_ok();
+        assert!(verified);
+
+        temp.close()?;
+
+        Ok(())
     }
 }

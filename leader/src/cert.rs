@@ -2,10 +2,9 @@ use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand};
 
-use rcgen::CertifiedKey;
 use shared::{
     Runnable,
-    cert::{CertificateBuilder, PemCertifiedKey},
+    cert::{CertificateBuilder, CertificateSigner, PemCertifiedKey},
 };
 
 #[derive(Parser)]
@@ -24,6 +23,17 @@ pub enum CertCommands {
     Sign(SignArgs),
 }
 
+impl Runnable for CertArgs {
+    fn run(&self) -> anyhow::Result<()> {
+        match &self.command {
+            CertCommands::Gen(args) => run_gen(&args.common_name, &args.outdir),
+            CertCommands::Sign(args) => {
+                run_sign(&args.ca_cert, &args.ca_key, &args.csr, &args.signed_cert)
+            }
+        }
+    }
+}
+
 #[derive(Parser)]
 #[command(about = "Generates a root CA certificate")]
 pub struct GenArgs {
@@ -34,15 +44,6 @@ pub struct GenArgs {
     /// The output directory.
     #[arg(short, long)]
     pub outdir: PathBuf,
-}
-
-impl Runnable for CertArgs {
-    fn run(&self) -> anyhow::Result<()> {
-        match &self.command {
-            CertCommands::Gen(args) => run_gen(&args.common_name, &args.outdir),
-            CertCommands::Sign(_) => todo!(),
-        }
-    }
 }
 
 fn run_gen(common_name: &str, outdir: &Path) -> anyhow::Result<()> {
@@ -64,5 +65,34 @@ fn run_gen(common_name: &str, outdir: &Path) -> anyhow::Result<()> {
 #[derive(Parser)]
 #[command(about = "Signs a certificate signing request")]
 pub struct SignArgs {
+    /// Path to the CA certificate file.
+    #[arg(long)]
+    pub ca_cert: PathBuf,
 
+    /// Path to the CA key pair file.
+    #[arg(long)]
+    pub ca_key: PathBuf,
+
+    /// Path to the CSR file.
+    #[arg(long)]
+    pub csr: PathBuf,
+
+    /// Path to save the signed certificate file.
+    #[arg(long)]
+    pub signed_cert: PathBuf,
+}
+
+fn run_sign(
+    ca_cert_path: &Path,
+    ca_key_path: &Path,
+    csr_path: &Path,
+    signed_cert_path: &Path,
+) -> anyhow::Result<()> {
+    let ca = PemCertifiedKey::read(ca_cert_path, ca_key_path)?.try_into()?;
+    let signer = CertificateSigner::new(ca);
+    signer.sign_pem_file(csr_path, signed_cert_path)?;
+
+    tracing::info!("Certificate signed successfully");
+
+    Ok(())
 }
