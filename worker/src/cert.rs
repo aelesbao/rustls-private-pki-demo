@@ -1,11 +1,8 @@
 use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand};
-use rcgen::{Certificate, ExtendedKeyUsagePurpose, IsCa, KeyPair, KeyUsagePurpose};
-use shared::{
-    Runnable,
-    cert::{generate_certificate, save_cert},
-};
+
+use shared::{Runnable, cert::CertificateBuilder};
 
 #[derive(Parser)]
 #[command(about = "Commands to work with X.509 certificates")]
@@ -41,32 +38,17 @@ impl Runnable for CertArgs {
 }
 
 fn run_gen(common_name: &str, outdir: &Path) -> anyhow::Result<()> {
-    tracing::info!("Generating Root Certificate Authority");
+    tracing::info!("Generating Certificate Sign Request (CSR) for '{common_name}'");
 
-    let (cert, key_pair) = generate_csr(common_name)?;
-    save_cert(outdir, "worker", cert, key_pair)?;
+    let csr = CertificateBuilder::new(common_name)
+        .certificate_signing_request()
+        .client_auth()
+        .server_auth()
+        .build()?;
+    let csr_pem = csr.serialize_pem()?;
+    csr_pem.write(outdir, "worker")?;
 
-    tracing::info!("Root CA generated successfully");
+    tracing::info!("CSR generated successfully");
 
     Ok(())
-}
-
-pub fn generate_csr(common_name: &str) -> anyhow::Result<(Certificate, KeyPair)> {
-    // Set Subject Alternative Name for the worker (use hostname or IP as needed)
-    //let subject_alt_names = vec![SanType::DnsName("localhost".to_string())];
-
-    // Set key usage and extended key usage for a client/server certificate
-    let key_usages = vec![
-        KeyUsagePurpose::DigitalSignature,
-        KeyUsagePurpose::KeyEncipherment,
-    ];
-
-    let extended_key_usages = vec![
-        ExtendedKeyUsagePurpose::ServerAuth,
-        ExtendedKeyUsagePurpose::ClientAuth,
-    ];
-
-    let is_ca = IsCa::ExplicitNoCa;
-
-    generate_certificate(common_name, is_ca, key_usages, extended_key_usages)
 }
