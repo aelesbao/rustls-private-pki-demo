@@ -2,7 +2,11 @@ use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand};
 
-use shared::{Runnable, cert::CertificateBuilder};
+use rcgen::CertifiedKey;
+use shared::{
+    Runnable,
+    cert::{CertificateBuilder, PemCertifiedKey},
+};
 
 #[derive(Parser)]
 #[command(about = "Commands to work with X.509 certificates")]
@@ -49,8 +53,8 @@ fn run_gen(common_name: &str, outdir: &Path) -> anyhow::Result<()> {
         .organization_name("Acme Ltd.")
         .validity(365 * 10)
         .build()?;
-    let ca_pem = ca.serialize_pem();
-    ca_pem.write(outdir, "ca")?;
+
+    PemCertifiedKey::from(&ca).write(outdir, "ca")?;
 
     tracing::info!("Root CA generated successfully");
 

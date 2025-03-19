@@ -2,7 +2,10 @@ use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand};
 
-use shared::{Runnable, cert::CertificateBuilder};
+use shared::{
+    Runnable,
+    cert::{CertificateBuilder, PemCertifiedKey},
+};
 
 #[derive(Parser)]
 #[command(about = "Commands to work with X.509 certificates")]
@@ -45,8 +48,7 @@ fn run_gen(common_name: &str, outdir: &Path) -> anyhow::Result<()> {
         .client_auth()
         .server_auth()
         .build()?;
-    let csr_pem = csr.serialize_pem()?;
-    csr_pem.write(outdir, "worker")?;
+    PemCertifiedKey::try_from(&csr)?.write(outdir, "worker")?;
 
     tracing::info!("CSR generated successfully");
 

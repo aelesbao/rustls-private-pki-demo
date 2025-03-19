@@ -1,12 +1,13 @@
 use std::{fs, io, path::Path};
 
 use rcgen::{
-    BasicConstraints, Certificate, CertificateParams, CertificateSigningRequest, DistinguishedName,
-    DnType, ExtendedKeyUsagePurpose, IsCa, KeyPair, KeyUsagePurpose, PKCS_ED25519, SanType,
+    BasicConstraints, Certificate, CertificateParams, CertificateSigningRequest,
+    CertificateSigningRequestParams, CertifiedKey, DistinguishedName, DnType,
+    ExtendedKeyUsagePurpose, IsCa, KeyPair, KeyUsagePurpose, PKCS_ED25519, SanType,
 };
 
 #[derive(Debug, Clone)]
-/// PEM serialized Certificate and PEM serialized corresponding private key.
+/// The PEM of an issued certificate, together with the subject key pair.
 pub struct PemCertifiedKey {
     pub cert_pem: String,
     pub private_key_pem: String,
@@ -32,9 +33,51 @@ impl PemCertifiedKey {
 
         Ok(())
     }
+
+    // Loads a PEM certificate and key pair from the file system.
+    pub fn read(cert_path: &Path, private_key_path: &Path) -> Result<Self, io::Error> {
+        let cert_pem = fs::read_to_string(cert_path)?;
+        let private_key_pem = fs::read_to_string(private_key_path)?;
+
+        Ok(Self {
+            cert_pem,
+            private_key_pem,
+        })
+    }
 }
 
-/// Builder to configure TLS [CertificateParams] to be finalized into either a [Ca] or a [Csr].
+impl From<&CertifiedKey> for PemCertifiedKey {
+    fn from(value: &CertifiedKey) -> Self {
+        PemCertifiedKey {
+            cert_pem: value.cert.pem(),
+            private_key_pem: value.key_pair.serialize_pem(),
+        }
+    }
+}
+
+impl TryFrom<&Csr> for PemCertifiedKey {
+    type Error = rcgen::Error;
+
+    fn try_from(value: &Csr) -> Result<Self, rcgen::Error> {
+        Ok(PemCertifiedKey {
+            cert_pem: value.csr.pem()?,
+            private_key_pem: value.key_pair.serialize_pem(),
+        })
+    }
+}
+
+impl TryFrom<PemCertifiedKey> for CertifiedKey {
+    type Error = rcgen::Error;
+
+    fn try_from(value: PemCertifiedKey) -> Result<Self, Self::Error> {
+        let params = CertificateParams::from_ca_cert_pem(&value.cert_pem)?;
+        let key_pair = KeyPair::from_pem(&value.private_key_pem)?;
+        let cert = params.self_signed(&key_pair)?;
+        Ok(Self { cert, key_pair })
+    }
+}
+
+/// Builder to configure TLS [CertificateParams] to be finalized into either a CA ([CertifiedKey]) or a CSR ([Csr]).
 #[derive(Default)]
 pub struct CertificateBuilder {
     params: CertificateParams,
@@ -52,7 +95,7 @@ impl CertificateBuilder {
         Self { params }
     }
 
-    /// Set options for [Ca] Certificates.
+    /// Set options for `CA` Certificates.
     ///
     /// # Example
     ///
@@ -77,7 +120,7 @@ impl CertificateBuilder {
     }
 }
 
-/// [CertificateParams] from which an [Ca] [Certificate] can be built.
+/// [CertificateParams] from which a [CertifiedKey] `CA` can be built.
 pub struct CaBuilder {
     params: CertificateParams,
 }
@@ -109,34 +152,12 @@ impl CaBuilder {
         self
     }
 
-    /// Builds a new self-signed [Ca] Certificate.
-    pub fn build(self) -> Result<Ca, rcgen::Error> {
+    /// Builds a new self-signed CA [CertifiedKey].
+    pub fn build(self) -> Result<CertifiedKey, rcgen::Error> {
         tracing::debug!("Building and signing Certificate Authority");
         let key_pair = KeyPair::generate_for(&PKCS_ED25519)?;
         let cert = self.params.self_signed(&key_pair)?;
-        Ok(Ca { cert, key_pair })
-    }
-}
-
-/// Certificate Authority [Certificate].
-pub struct Ca {
-    cert: Certificate,
-    key_pair: KeyPair,
-}
-
-impl Ca {
-    /// Self-sign and serialize.
-    pub fn serialize_pem(&self) -> PemCertifiedKey {
-        PemCertifiedKey {
-            cert_pem: self.cert.pem(),
-            private_key_pem: self.key_pair.serialize_pem(),
-        }
-    }
-
-    /// Return the self-signed CA `&Certificate`.
-    #[allow(dead_code)]
-    pub fn cert(&self) -> &Certificate {
-        &self.cert
+        Ok(CertifiedKey { cert, key_pair })
     }
 }
 
@@ -211,8 +232,15 @@ impl Csr {
     }
 }
 
+
+/// Signs a Certificate Signing Request using a CA and key pair.
+pub struct CertificateSigner {}
+
+impl CertificateSigner {}
+
 #[cfg(test)]
 mod tests {
+    use assert_fs::prelude::*;
     use rcgen::CertificateSigningRequestParams;
     use x509_parser::prelude::{FromDer, X509Certificate};
 
@@ -220,8 +248,6 @@ mod tests {
 
     #[test]
     fn test_write_files() -> anyhow::Result<()> {
-        use assert_fs::prelude::*;
-
         let temp = assert_fs::TempDir::new()?;
         let dir = temp.path();
         let entity_cert = temp.child("cert.crt");
@@ -242,6 +268,25 @@ mod tests {
     }
 
     #[test]
+    fn test_read_files() -> anyhow::Result<()> {
+        let temp = assert_fs::TempDir::new()?;
+
+        let entity_cert = temp.child("cert.crt");
+        entity_cert.write_str("w")?;
+
+        let entity_key = temp.child("cert.key");
+        entity_key.write_str("y")?;
+
+        let pem = PemCertifiedKey::read(entity_cert.path(), entity_key.path())?;
+
+        // assert contents of PEM
+        assert_eq!(pem.cert_pem, "w");
+        assert_eq!(pem.private_key_pem, "y");
+
+        Ok(())
+    }
+
+    #[test]
     fn init_ca() {
         let builder = CertificateBuilder::new("CA").certificate_authority();
         assert_eq!(
@@ -251,18 +296,35 @@ mod tests {
     }
 
     #[test]
+    fn load_ca_from_pem() -> anyhow::Result<()> {
+        let cert = CertificateBuilder::new("Acme Ltd. CA")
+            .certificate_authority()
+            .build()?;
+        let cert_key_pem = PemCertifiedKey::from(&cert);
+        let ca = CertifiedKey::try_from(cert_key_pem)?;
+        let issuer_der = pem::parse(ca.cert.pem())?;
+        let (_, cert) = X509Certificate::from_der(issuer_der.contents())?;
+        assert_eq!(cert.issuer().to_string(), "CN=Acme Ltd. CA".to_string());
+
+        Ok(())
+    }
+
+    #[test]
     fn serialize_csr_with_ed25519_sig() -> anyhow::Result<()> {
         let ca = CertificateBuilder::new("CA")
             .certificate_authority()
             .build()?;
 
-        let issuer_der = pem::parse(ca.serialize_pem().cert_pem)?;
+        let PemCertifiedKey { cert_pem, .. } = PemCertifiedKey::from(&ca);
+        let issuer_der = pem::parse(cert_pem)?;
         let (_, issuer) = X509Certificate::from_der(issuer_der.contents())?;
 
         let csr = CertificateBuilder::new("localhost")
             .certificate_signing_request()
             .build()?;
-        let csr_pem = csr.serialize_pem()?.cert_pem;
+        let PemCertifiedKey {
+            cert_pem: csr_pem, ..
+        } = PemCertifiedKey::try_from(&csr)?;
         let signed_cert = CertificateSigningRequestParams::from_pem(csr_pem.as_str())?
             .signed_by(&ca.cert, &ca.key_pair)?;
 
@@ -283,7 +345,7 @@ mod tests {
 
     #[test]
     fn client_auth_csr() {
-        let mut builder = CertificateBuilder::new("localhost").certificate_signing_request();
+        let builder = CertificateBuilder::new("localhost").certificate_signing_request();
         assert_eq!(
             builder.client_auth().params.extended_key_usages,
             vec![ExtendedKeyUsagePurpose::ClientAuth]
@@ -292,7 +354,7 @@ mod tests {
 
     #[test]
     fn server_auth_csr() {
-        let mut builder = CertificateBuilder::new("localhost").certificate_signing_request();
+        let builder = CertificateBuilder::new("localhost").certificate_signing_request();
         assert_eq!(
             builder.server_auth().params.extended_key_usages,
             vec![ExtendedKeyUsagePurpose::ServerAuth]
