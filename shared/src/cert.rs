@@ -202,11 +202,11 @@ impl PemCertifiedKey {
 
         fs::create_dir_all(outdir)?;
 
-        let path = outdir.join(format!("{name}.crt"));
+        let path = outdir.join(format!("{name}_cert.pem"));
         tracing::debug!(%self.cert_pem, "Saving certificate to {}", path.to_string_lossy());
         fs::write(path, self.cert_pem.as_bytes())?;
 
-        let path = outdir.join(format!("{name}.key"));
+        let path = outdir.join(format!("{name}_key.pem"));
         tracing::debug!(%self.private_key_pem, "Saving key pair to {}", path.to_string_lossy());
         fs::write(path, self.private_key_pem.as_bytes())?;
 
@@ -268,15 +268,15 @@ mod tests {
     fn test_write_files() -> anyhow::Result<()> {
         let temp = assert_fs::TempDir::new()?;
         let dir = temp.path();
-        let entity_cert = temp.child("cert.crt");
-        let entity_key = temp.child("cert.key");
+        let entity_cert = temp.child("foo_cert.pem");
+        let entity_key = temp.child("foo_key.pem");
 
         let pck = PemCertifiedKey {
             cert_pem: "x".into(),
             private_key_pem: "y".into(),
         };
 
-        pck.write(dir, "cert")?;
+        pck.write(dir, "foo")?;
 
         // assert contents of created files
         entity_cert.assert("x");
@@ -291,10 +291,10 @@ mod tests {
     fn test_read_files() -> anyhow::Result<()> {
         let temp = assert_fs::TempDir::new()?;
 
-        let entity_cert = temp.child("cert.crt");
+        let entity_cert = temp.child("foo_cert.pem");
         entity_cert.write_str("w")?;
 
-        let entity_key = temp.child("cert.key");
+        let entity_key = temp.child("foo_key.pem");
         entity_key.write_str("y")?;
 
         let pck = PemCertifiedKey::read(entity_cert.path(), entity_key.path())?;
@@ -419,10 +419,10 @@ mod tests {
             .build()?;
 
         let temp = assert_fs::TempDir::new()?;
-        let csr_cert_child = temp.child("localhost.crt");
+        let csr_cert_child = temp.child("localhost_cert.pem");
         PemCertifiedKey::try_from(&csr)?.write(temp.path(), "localhost")?;
 
-        let signed_child = temp.child("localhost.key");
+        let signed_child = temp.child("localhost_key.pem");
 
         let signer = CertificateSigner::new(ca);
         signer.sign_pem_file(csr_cert_child.path(), signed_child.path())?;
