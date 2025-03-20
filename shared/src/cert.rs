@@ -141,47 +141,44 @@ impl CsrBuilder {
 
 /// A [CertificateSigningRequest], together with the subject key pair.
 pub struct CsrKey {
-    csr: CertificateSigningRequest,
-    key_pair: KeyPair,
+    pub csr: CertificateSigningRequest,
+    pub key_pair: KeyPair,
 }
 
-/// Certificate signed for a CA and key pair.
+/// Signs a CSR using a CA.
 pub struct CertificateSigner {
+    /// The CA used to sign the CSR.
     ca: CertifiedKey,
+
+    /// The [CertificateSigningRequestParams] to be signed.
+    csr: CertificateSigningRequestParams,
 }
 
 impl CertificateSigner {
     /// Initializes the `CertificateSigner`.
-    pub fn new(ca: CertifiedKey) -> Self {
-        Self { ca }
+    pub fn new(ca: CertifiedKey, csr: CertificateSigningRequestParams) -> Self {
+        Self { ca, csr }
     }
 
-    /// Signs a [CertificateSigningRequestParams] using a CA and key pair and returns a signed [Certificate].
-    pub fn sign_pem(&self, csr_pem: &str) -> Result<Certificate, rcgen::Error> {
-        let params = CertificateSigningRequestParams::from_pem(csr_pem)?;
+    /// Initializes the `CertificateSigner` from a CA and a CSR PEM.
+    pub fn from_pem(ca: CertifiedKey, csr_pem: &str) -> Result<Self, rcgen::Error> {
+        let csr = CertificateSigningRequestParams::from_pem(csr_pem)?;
+        Ok(Self { ca, csr })
+    }
+
+    /// Sets the validity period for the certificate in days.
+    pub fn validity(mut self, days: u32) -> Self {
+        let now = time::OffsetDateTime::now_utc();
+        self.csr.params.not_before = now;
+        self.csr.params.not_after = now + time::Duration::days(days as i64);
+        self
+    }
+
+    /// Signs a [CertificateSigningRequestParams] and returns a signed [Certificate].
+    pub fn sign(mut self) -> Result<Certificate, rcgen::Error> {
         tracing::info!("Signing CSR");
-        let signed_cert = params.signed_by(&self.ca.cert, &self.ca.key_pair)?;
-        Ok(signed_cert)
-    }
-
-    /// Signs a CSR PEM file and saves the signed certificate to the filesystem.
-    pub fn sign_pem_file(&self, csr_path: &Path, signed_cert_path: &Path) -> anyhow::Result<()> {
-        tracing::debug!("Opening CSR at {}", csr_path.to_string_lossy());
-        let csr_pem = fs::read_to_string(csr_path)?;
-        let signed_cert = self.sign_pem(&csr_pem)?;
-
-        if let Some(outdir) = signed_cert_path.parent() {
-            fs::create_dir_all(outdir)?;
-        }
-
-        tracing::debug!(
-            signed_cert = %signed_cert.pem(),
-            "Saving signed certificate to {}",
-            signed_cert_path.to_string_lossy()
-        );
-        fs::write(signed_cert_path, signed_cert.pem().as_bytes())?;
-
-        Ok(())
+        self.csr.params.use_authority_key_identifier_extension = true;
+        self.csr.signed_by(&self.ca.cert, &self.ca.key_pair)
     }
 }
 
@@ -418,23 +415,18 @@ mod tests {
             .certificate_signing_request()
             .build()?;
 
-        let temp = assert_fs::TempDir::new()?;
-        let csr_cert_child = temp.child("localhost_cert.pem");
-        PemCertifiedKey::try_from(&csr)?.write(temp.path(), "localhost")?;
+        let signed_cert = CertificateSigner::from_pem(ca, &csr.csr.pem()?)?
+            .validity(90)
+            .sign()?;
 
-        let signed_child = temp.child("localhost_key.pem");
-
-        let signer = CertificateSigner::new(ca);
-        signer.sign_pem_file(csr_cert_child.path(), signed_child.path())?;
-
-        let signed_pem = fs::read_to_string(signed_child.path())?;
-        let der = pem::parse(signed_pem)?;
-        let (_, cert) = X509Certificate::from_der(der.contents())?;
+        let (_, cert) = X509Certificate::from_der(signed_cert.der())?;
 
         let verified = cert.verify_signature(Some(issuer.public_key())).is_ok();
         assert!(verified);
 
-        temp.close()?;
+        let validity = cert.validity().not_after.to_datetime();
+        let expected_validity = time::OffsetDateTime::now_utc() + time::Duration::days(90);
+        assert_eq!(validity.date(), expected_validity.date());
 
         Ok(())
     }

@@ -1,4 +1,7 @@
-use std::path::{Path, PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 use clap::{Parser, Subcommand};
 
@@ -89,8 +92,23 @@ fn run_sign(
     signed_cert_path: &Path,
 ) -> anyhow::Result<()> {
     let ca = PemCertifiedKey::read(ca_cert_path, ca_key_path)?.try_into()?;
-    let signer = CertificateSigner::new(ca);
-    signer.sign_pem_file(csr_path, signed_cert_path)?;
+    tracing::debug!("Opening CSR at {}", csr_path.to_string_lossy());
+    let csr_pem = fs::read_to_string(csr_path)?;
+
+    let signed_cert = CertificateSigner::from_pem(ca, &csr_pem)?
+        .validity(90)
+        .sign()?;
+
+    if let Some(outdir) = signed_cert_path.parent() {
+        fs::create_dir_all(outdir)?;
+    }
+
+    tracing::debug!(
+        signed_cert = %signed_cert.pem(),
+        "Saving signed certificate to {}",
+        signed_cert_path.to_string_lossy()
+    );
+    fs::write(signed_cert_path, signed_cert.pem().as_bytes())?;
 
     tracing::info!("Certificate signed successfully");
 
