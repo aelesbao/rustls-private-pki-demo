@@ -4,7 +4,6 @@ resolver = "3"
 
 [workspace.dependencies]
 anyhow = { version = "1.0.97", features = ["backtrace"] }
-
 async-trait = "0.1.87"
 time = "0.3.39"
 
@@ -23,9 +22,8 @@ x509-parser = "0.17.0"
 pem = "3.0.5"
 
 tokio = { version = "1.44.1", features = ["full"] }
-tokio-rustls = "0.26.2"
 
 tracing = { version = "0.1.41", features = ["log"] }
 tracing-appender = "0.2.3"
 tracing-error = "0.2.0"
-tracing-subscriber = { version = "0.3.18", features = ["env-filter", "json"] }
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
