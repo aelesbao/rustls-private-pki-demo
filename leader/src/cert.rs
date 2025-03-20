@@ -3,6 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use async_trait::async_trait;
 use clap::{Parser, Subcommand};
 
 use shared::{
@@ -26,8 +27,9 @@ pub enum CertCommands {
     Sign(SignArgs),
 }
 
+#[async_trait]
 impl Runnable for CertArgs {
-    fn run(&self) -> anyhow::Result<()> {
+    async fn run(&self) -> anyhow::Result<()> {
         match &self.command {
             CertCommands::Gen(args) => run_gen(&args.common_name, &args.outdir),
             CertCommands::Sign(args) => {

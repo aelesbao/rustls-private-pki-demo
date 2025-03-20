@@ -1,5 +1,8 @@
+use async_trait::async_trait;
+
 pub mod cert;
 
+#[async_trait]
 pub trait Runnable<E = anyhow::Error> {
-    fn run(&self) -> Result<(), E>;
+    async fn run(&self) -> Result<(), E>;
 }

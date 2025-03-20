@@ -1,3 +1,4 @@
+use async_trait::async_trait;
 use clap::Parser;
 use shared::Runnable;
 
@@ -5,8 +6,9 @@ use shared::Runnable;
 #[command(about = "Starts the leader")]
 pub struct ValidateArgs {}
 
+#[async_trait]
 impl Runnable for ValidateArgs {
-    fn run(&self) -> Result<(), anyhow::Error> {
+    async fn run(&self) -> Result<(), anyhow::Error> {
         todo!()
     }
 }

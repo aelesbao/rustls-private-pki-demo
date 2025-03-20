@@ -5,8 +5,9 @@ use shared::Runnable;
 #[command(about = "Starts the worker")]
 pub struct ServerArgs {}
 
+#[async_trait]
 impl Runnable for ServerArgs {
-    fn run(&self) -> Result<(), anyhow::Error> {
-        todo!()
+    async fn run(&self) -> anyhow::Result<()> {
+        Ok(())
     }
 }

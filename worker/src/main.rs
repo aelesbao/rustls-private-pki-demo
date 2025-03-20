@@ -1,6 +1,7 @@
 mod cert;
 mod server;
 
+use async_trait::async_trait;
 use clap::{Parser, Subcommand};
 
 use shared::Runnable;
@@ -29,11 +30,12 @@ enum Commands {
     Server(server::ServerArgs),
 }
 
+#[async_trait]
 impl Runnable for Cli {
-    fn run(&self) -> anyhow::Result<()> {
+    async fn run(&self) -> anyhow::Result<()> {
         match &self.command {
-            Commands::Cert(cert) => cert.run(),
-            Commands::Server(server) => server.run(),
+            Commands::Cert(cert) => cert.run().await,
+            Commands::Server(server) => server.run().await,
         }
     }
 }
@@ -43,7 +45,7 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let _guard = setup_logger(cli.log_level)?;
 
-    cli.run()
+    cli.run().await
 }
 
 pub fn setup_logger(level: LevelFilter) -> Result<WorkerGuard, SetGlobalDefaultError> {
