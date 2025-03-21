@@ -19,12 +19,12 @@ pub struct CertArgs {
 #[derive(Subcommand)]
 pub enum CertCommands {
     /// Generates a Certificate Sign Request (CSR.
-    Gen(GenArgs),
+    Csr(CsrArgs),
 }
 
 #[derive(Parser)]
 #[command(about = "Generates a Certificate Sign Request (CSR)")]
-pub struct GenArgs {
+pub struct CsrArgs {
     /// The common name of the certificate.
     #[arg(short, long)]
     pub common_name: String,
@@ -38,12 +38,12 @@ pub struct GenArgs {
 impl Runnable for CertArgs {
     async fn run(&self) -> anyhow::Result<()> {
         match &self.command {
-            CertCommands::Gen(args) => run_gen(&args.common_name, &args.outdir),
+            CertCommands::Csr(args) => run_csr(&args.common_name, &args.outdir),
         }
     }
 }
 
-fn run_gen(common_name: &str, outdir: &Path) -> anyhow::Result<()> {
+fn run_csr(common_name: &str, outdir: &Path) -> anyhow::Result<()> {
     tracing::info!("Generating Certificate Sign Request (CSR) for '{common_name}'");
 
     let sans = vec![
