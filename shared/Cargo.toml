@@ -6,7 +6,6 @@ edition = "2024"
 [dependencies]
 anyhow = { workspace = true }
 async-trait = { workspace = true }
-pem = { workspace = true }
 rcgen = { workspace = true }
 rustls-pki-types = { workspace = true }
 time = { workspace = true }

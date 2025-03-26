@@ -257,6 +257,7 @@ impl TryFrom<&CsrKey> for PemCertifiedKey {
 mod tests {
     use assert_fs::prelude::*;
     use rcgen::CertificateSigningRequestParams;
+    use rustls_pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
     use x509_parser::prelude::{FromDer, X509Certificate};
 
     use super::*;
@@ -321,8 +322,8 @@ mod tests {
             .build()?;
         let cert_pck = PemCertifiedKey::from(&cert);
         let ca = CertifiedKey::try_from(cert_pck)?;
-        let issuer_der = pem::parse(ca.cert.pem())?;
-        let (_, cert) = X509Certificate::from_der(issuer_der.contents())?;
+        let ca_der = CertificateDer::from_pem_slice(ca.cert.pem().as_bytes())?;
+        let (_, cert) = X509Certificate::from_der(&ca_der)?;
         assert_eq!(cert.issuer().to_string(), "CN=Acme Ltd. CA".to_string());
 
         Ok(())
@@ -334,9 +335,16 @@ mod tests {
             .certificate_authority()
             .build()?;
 
-        let PemCertifiedKey { cert_pem, .. } = PemCertifiedKey::from(&ca);
-        let issuer_der = pem::parse(cert_pem)?;
-        let (_, issuer) = X509Certificate::from_der(issuer_der.contents())?;
+        let PemCertifiedKey {
+            cert_pem,
+            private_key_pem,
+        } = PemCertifiedKey::from(&ca);
+
+        let issuer_der = CertificateDer::from_pem_slice(cert_pem.as_bytes())?;
+        let (_, issuer) = X509Certificate::from_der(&issuer_der)?;
+
+        let pk_der = PrivateKeyDer::from_pem_slice(private_key_pem.as_bytes())?;
+        assert!(matches!(pk_der, PrivateKeyDer::Pkcs8(_)));
 
         let csr = CertificateBuilder::new("localhost")
             .certificate_signing_request()
@@ -347,8 +355,8 @@ mod tests {
         let signed_cert = CertificateSigningRequestParams::from_pem(csr_pem.as_str())?
             .signed_by(&ca.cert, &ca.key_pair)?;
 
-        let der = pem::parse(signed_cert.pem())?;
-        let (_, cert) = X509Certificate::from_der(der.contents())?;
+        let der = CertificateDer::from_pem_slice(signed_cert.pem().as_bytes())?;
+        let (_, cert) = X509Certificate::from_der(&der)?;
 
         let verified = cert.verify_signature(Some(issuer.public_key())).is_ok();
         assert!(verified);
@@ -408,8 +416,8 @@ mod tests {
             .certificate_authority()
             .build()?;
 
-        let issuer_der = pem::parse(ca.cert.pem())?;
-        let (_, issuer) = X509Certificate::from_der(issuer_der.contents())?;
+        let issuer_der = CertificateDer::from_pem_slice(ca.cert.pem().as_bytes())?;
+        let (_, issuer) = X509Certificate::from_der(&issuer_der)?;
 
         let csr = CertificateBuilder::new("localhost")
             .certificate_signing_request()
